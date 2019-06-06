@@ -1,0 +1,1 @@
+dataset=/home/chenlin/my-prog/slam/DepthMap/result_gps.gmap iters=3 scale=0.05 imgnum=30 binary=1 savepath=/home/chenlin/data/data/result/
