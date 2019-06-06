@@ -626,6 +626,7 @@ class DepthmapPruner {
              std::vector<float> *merged_normals,
              std::vector<unsigned char> *merged_colors,
              std::vector<unsigned char> *merged_labels) {
+    GSLAM::ScopedTimer tm("Pruner");
     cv::Matx33f Rinv = Rs_[0].t();
     for (int i = 0; i < depths_[0].rows; ++i) {
       for (int j = 0; j < depths_[0].cols; ++j) {

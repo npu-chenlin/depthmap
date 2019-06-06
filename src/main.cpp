@@ -197,9 +197,9 @@ void addFrame(GSLAM::FramePtr fr,csfm::DepthmapEstimator& de,
     std::array<double,9> nR;
     GSLAM::Point3d nt;
     transform(Rs.back(),ts.back(),Rs.front(),ts.front(),nR,nt);
-    for(auto i : nR){std::cout<<i<<" ";}
-    std::cout<<std::endl;
-    std::cout<<nt.x<<" "<<nt.y<<" "<<nt.z<<std::endl;
+//    for(auto i : nR){std::cout<<i<<" ";}
+//    std::cout<<std::endl;
+//    std::cout<<nt.x<<" "<<nt.y<<" "<<nt.z<<std::endl;
     de.AddView(Ks.back().data(),nR.data(),&nt.x,grays.back().data,
                mask.data,image.cols,image.rows);
     cv::imwrite(svar.GetString("savepath","./")+std::to_string(count)+"/img"+std::to_string(images.size())+".jpg",images.back());
@@ -236,13 +236,15 @@ int main(int argc,char** argv)
     GSLAM::FrameArray frames=map->getFrames();
     float minScore=svar.GetDouble("score",0.1);
     int count=0;
+    PlyObject ply(svar.GetString("savepath","./")+std::to_string(count)+"/"+std::to_string(count)+".ply");
+    csfm::DepthmapPruner pruner;
     for(GSLAM::FramePtr cur:frames){
         std::string dir = "mkdir -p "+svar.GetString("savepath","./")+std::to_string(count);
         std::system(dir.c_str());
         auto neighbors=getNeighbors(cur,map);
         auto minmax  = getMinMaxDepth(cur,map);
         csfm::DepthmapEstimator de;
-        de.SetPatchMatchIterations(svar.GetInt("iters",20));
+        de.SetPatchMatchIterations(svar.GetInt("iters",3));
         de.SetMinPatchSD(svar.GetDouble("sd",1.));
         de.SetDepthRange(minmax[0],minmax[1],50);
         cv::Mat mask;
@@ -281,23 +283,28 @@ int main(int argc,char** argv)
             depth.at<float>(j) = mapminmax[0]+ (mapminmax[1]-mapminmax[0])*(depth.at<float>(j)-minmax[0])/(minmax[1]-minmax[0]);
         }
         cv::imwrite(svar.GetString("savepath","./")+std::to_string(count)+"/"+"depth.jpg",depth);
-        csfm::DepthmapPruner pruner;
         std::vector<float>   merged_points,merged_normals;
         std::vector<unsigned char> merged_colors;
         std::vector<unsigned char> merged_labels;
-        pruner.AddView(Ks[0].data(),Rs[0].data(),&ts[0].x,(float*)result.depth.data,(float*)result.plane.data,
+        auto p = cur->getCamera().getParameters();
+        std::array<double,9> K={p[2], 0    , p[4],
+                                0   , p[3] , p[5],
+                                0   , 0    , 1};
+        std::array<double,9> R{1,0,0,0,1,0,0,0,1};
+        cur->getPose().inverse().getRotation().getMatrix(R.data());
+        GSLAM::Point3d t=cur->getPose().inverse().get_translation();
+        pruner.AddView(K.data(),R.data(),&t.x,(float*)result.depth.data,(float*)result.plane.data,
                 images[0].data,mask.data,images[0].cols,images[0].rows);
+        count++;
+        std::cout<<"img"<<count<<"complete!"<<std::endl;
+        if(count == svar.GetInt("imgnum",1)){
+            break;
+        }
         pruner.Prune(&merged_points,&merged_normals,&merged_colors,&merged_labels);
-
-        PlyObject ply(svar.GetString("savepath","./")+std::to_string(count)+"/"+std::to_string(count)+".ply");
         for(int i=0;i*3<merged_points.size();i++){
             ply.addPoint(GSLAM::Point3d(merged_points[3*i+0],merged_points[3*i+1],merged_points[3*i+2]),
                     GSLAM::Point3ub(merged_colors[3*i+0],merged_colors[3*i+1],merged_colors[3*i+2]),
                     GSLAM::Point3d(merged_normals[3*i+0],merged_normals[3*i+1],merged_normals[3*i+2]));
-        }
-        count++;
-        if(count == svar.GetInt("imgnum",1)){
-            break;
         }
     }
     return 0;
