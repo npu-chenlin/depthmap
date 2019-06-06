@@ -666,8 +666,8 @@ class DepthmapPruner {
           merged_normals->push_back(R1_normal[0]);
           merged_normals->push_back(R1_normal[1]);
           merged_normals->push_back(R1_normal[2]);
-          merged_colors->push_back(color[1]);
           merged_colors->push_back(color[2]);
+          merged_colors->push_back(color[1]);
           merged_colors->push_back(color[0]);
           merged_labels->push_back(label);
         }
