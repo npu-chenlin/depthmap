@@ -276,16 +276,14 @@ int main(int argc,char** argv)
             if(depth>minmax[1])depth=0;
             if(result.score.at<float>(j)<minScore) depth=0;
         }
-        cv::Mat depth=result.depth.clone();
-        int mapminmax[]={50,245};
-        for(int j=0;j<depth.total();j++){
-            if(depth.at<float>(j)<minmax[0])continue;
-            depth.at<float>(j) = mapminmax[0]+ (mapminmax[1]-mapminmax[0])*(depth.at<float>(j)-minmax[0])/(minmax[1]-minmax[0]);
-        }
-        cv::imwrite(svar.GetString("savepath","./")+std::to_string(count)+"/"+"depth.jpg",depth);
-        std::vector<float>   merged_points,merged_normals;
-        std::vector<unsigned char> merged_colors;
-        std::vector<unsigned char> merged_labels;
+        //save depth file
+//        cv::Mat depth=result.depth.clone();
+//        int mapminmax[]={50,245};
+//        for(int j=0;j<depth.total();j++){
+//            if(depth.at<float>(j)<minmax[0])continue;
+//            depth.at<float>(j) = mapminmax[0]+ (mapminmax[1]-mapminmax[0])*(depth.at<float>(j)-minmax[0])/(minmax[1]-minmax[0]);
+//        }
+//        cv::imwrite(svar.GetString("savepath","./")+std::to_string(count)+"/"+"depth.jpg",depth);
         auto p = cur->getCamera().getParameters();
         std::array<double,9> K={p[2], 0    , p[4],
                                 0   , p[3] , p[5],
@@ -300,12 +298,15 @@ int main(int argc,char** argv)
         if(count == svar.GetInt("imgnum",1)){
             break;
         }
-        pruner.Prune(&merged_points,&merged_normals,&merged_colors,&merged_labels);
-        for(int i=0;i*3<merged_points.size();i++){
-            ply.addPoint(GSLAM::Point3d(merged_points[3*i+0],merged_points[3*i+1],merged_points[3*i+2]),
-                    GSLAM::Point3ub(merged_colors[3*i+0],merged_colors[3*i+1],merged_colors[3*i+2]),
-                    GSLAM::Point3d(merged_normals[3*i+0],merged_normals[3*i+1],merged_normals[3*i+2]));
-        }
+    }
+    std::vector<float>   merged_points,merged_normals;
+    std::vector<unsigned char> merged_colors;
+    std::vector<unsigned char> merged_labels;
+    pruner.Prune(&merged_points,&merged_normals,&merged_colors,&merged_labels);
+    for(int i=0;i*3<merged_points.size();i++){
+        ply.addPoint(GSLAM::Point3d(merged_points[3*i+0],merged_points[3*i+1],merged_points[3*i+2]),
+                GSLAM::Point3ub(merged_colors[3*i+0],merged_colors[3*i+1],merged_colors[3*i+2]),
+                GSLAM::Point3d(merged_normals[3*i+0],merged_normals[3*i+1],merged_normals[3*i+2]));
     }
     return 0;
 }
