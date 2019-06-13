@@ -554,11 +554,16 @@ public:
         Ks_.emplace_back(pK);
         Rs_.emplace_back(pR);
         ts_.emplace_back(pt);
-        depths_.emplace_back(cv::Mat(height, width, CV_32F, (void *)pdepth));
+        depths_.emplace_back(cv::Mat(height, width, CV_32F, (void *)pdepth).clone());
     }
 
-    void Clean() {
+    void Clean(cv::Mat& clean_depth) {
         int cleanNum=0;
+        clean_depth = depths_[0].clone();
+        if(Ks_.size()<=3){
+            std::cout<<"Cleaned Point Number: 0"<<std::endl;
+            return;
+        }
         for (int i = 0; i < depths_[0].rows; ++i) {
             for (int j = 0; j < depths_[0].cols; ++j) {
                 float depth = depths_[0].at<float>(i, j);
@@ -575,12 +580,12 @@ public:
                     }
                 }
                 if (consistent_views < min_consistent_views_) {
+                    clean_depth.at<float>(i, j) = 0;
                     cleanNum++;
-                    depths_[0].at<float>(i, j) = 0;
                 }
             }
         }
-        std::cout<<"Cleaned Pointt Number: "<<cleanNum<<std::endl;
+        std::cout<<"Cleaned Point Number: "<<cleanNum<<std::endl;
     }
 
 private:
