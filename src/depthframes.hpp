@@ -3,6 +3,7 @@
 #include "MapPoint.h"
 #include "MapHash.hpp"
 
+
 #include <GSLAM/core/Dataset.h>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <GSLAM/core/Timer.h>
@@ -175,7 +176,12 @@ struct depthframe
     std::vector<GSLAM::FrameID> neighbors;
     cv::Mat depth_in_ply;
 };
-
+struct ImageScaled{
+    cv::Mat image_scaled;
+    GSLAM::FramePtr fr;
+    std::array<double,9> K_scaled;
+    std::vector<GSLAM::FrameID> neighbors;
+};
 class depthframes
 {
 public:
@@ -189,135 +195,154 @@ public:
     ~depthframes(){}
 
     void init(){
-        allframes=map->getFrames();
+        allframes = map->getFrames();
+        imageNum = svar.GetInt("imgnum",allframes.size());
     }
     void setMinScore(float m){minScore=m;}
     void setDempthMapNum(int i){depthMapNum = i;}
     void setPlyPath(std::string p){plypath = p;}
     void setScale(float s){scale = s;}
-    cv::Mat addFrame(GSLAM::FramePtr fr,csfm::DepthmapEstimator& de,
-                     std::vector<cv::Mat>& grays,
-                     std::vector<std::array<double,9> >& Rs,
-                     std::vector<std::array<double,9> >& Ks,
-                     std::vector<GSLAM::Point3d>& ts,
-                     cv::Mat& mask){
-        std::string path;
-        fr->call("GetImagePath",&path);
-        path = "/home/chenlin/data/data/mavic-campus/images"+path.substr(path.rfind('/'));
-        cv::Mat image=cv::imread(path);
-        GSLAM::Camera cam=fr->getCamera();
-        if(cam.CameraType()!="PinHole"||scale<1)
-        {
-            cam=GSLAM::Camera(fr->getCamera().estimatePinHoleCamera().getParameters());
-            cam.applyScale(scale);
-            static GSLAM::Undistorter undis;
-            if(undis.cameraIn().info()!=fr->getCamera().info())
-            {
-                undis=GSLAM::Undistorter(fr->getCamera(),cam);
-            }
-            GSLAM::GImage undised;
-            undis.undistort(image,undised);
-            image=undised;
-        }
-        cv::Mat gray;
-        cv::cvtColor(image,gray,CV_BGR2GRAY);
-
-        std::vector<double>  p=cam.getParameters();
-        std::array<double,9> K={p[2], 0    , p[4],
-                                0   , p[3] , p[5],
-                                0   , 0    , 1};
+    void addFrame(ImageScaled& fr,csfm::DepthmapEstimator& de,
+                  std::vector<std::array<double,9> >& Rs,
+                  std::vector<GSLAM::Point3d>& ts,
+                  cv::Mat& mask){
         std::array<double,9> R{1,0,0,0,1,0,0,0,1};
-        fr->getPose().inverse().getRotation().getMatrix(R.data());
-        GSLAM::Point3d t=fr->getPose().inverse().get_translation();
-        if(mask.empty()) mask=cv::Mat::ones(image.rows,image.cols,CV_8UC1);
-        grays.push_back(gray);
+        GSLAM::SE3 Tcw=fr.fr->getPose().inverse();
+        Tcw.getRotation().getMatrix(R.data());
+        GSLAM::Point3d t=Tcw.get_translation();
+        if(mask.empty()) mask=cv::Mat::ones(fr.image_scaled.rows,fr.image_scaled.cols,CV_8UC1);
+        cv::Mat gray;
+        cv::cvtColor(fr.image_scaled,gray,CV_BGR2GRAY);
         Rs.push_back(R);
-        Ks.push_back(K);
         ts.push_back(t);
         std::array<double,9> nR;
         GSLAM::Point3d nt;
         transform(Rs.back(),ts.back(),Rs.front(),ts.front(),nR,nt);
-        de.AddView(Ks.back().data(),nR.data(),&nt.x,grays.back().data,
-                   mask.data,image.cols,image.rows);
-        return image;
+        de.AddView(fr.K_scaled.data(),nR.data(),&nt.x,gray.data,
+                   mask.data,mask.cols,mask.rows);
         //    cv::imwrite(svar.GetString("savepath","./")+std::to_string(count)+"/img"+std::to_string(images.size())+".jpg",images.back());
     }
-    void calculatedepth(){
+    void getImageInfo(GSLAM::FramePtr cur){
+        if(mScaledImages.find(cur->id())==mScaledImages.end()){
+            std::string path;
+            cur->call("GetImagePath",&path);
+            path = svar.GetString("imagepath","")+path.substr(path.rfind('/'));
+            cv::Mat image=cv::imread(path);
+            GSLAM::Camera cam=cur->getCamera();
+            if(cam.CameraType()!="PinHole"||scale<1)
+            {
+                cam=GSLAM::Camera(cur->getCamera().estimatePinHoleCamera().getParameters());
+                cam.applyScale(scale);
+                static GSLAM::Undistorter undis;
+                if(undis.cameraIn().info()!=cur->getCamera().info())
+                {
+                    undis=GSLAM::Undistorter(cur->getCamera(),cam);
+                }
+                GSLAM::GImage undised;
+                undis.undistort(image,undised);
+                image=undised;
+            }
+            std::vector<double>  p=cam.getParameters();
+            std::array<double,9> K={p[2], 0    , p[4],
+                                    0   , p[3] , p[5],
+                                    0   , 0    , 1};
+            std::array<double,9> R{1,0,0,0,1,0,0,0,1};
+            cur->getPose().inverse().getRotation().getMatrix(R.data());
+            GSLAM::Point3d t=cur->getPose().inverse().get_translation();
+            ImageScaled im;
+            im.image_scaled = image;
+            im.K_scaled = K;
+            im.neighbors = getNeighbors(cur,map);
+            im.fr=cur;
+            mScaledImages[cur->id()] = im;
+        }
+    }
+
+    void getScaledImages(){
         int count=0;
         for(GSLAM::FramePtr cur:allframes){
-            //            std::string dir = "mkdir -p "+svar.GetString("savepath","./")+std::to_string(count);
-            //            std::system(dir.c_str());
-            auto neighbors=getNeighbors(cur,map);
-            auto minmax  = getMinMaxDepth(cur,map);
-            csfm::DepthmapEstimator de;
-            de.SetPatchMatchIterations(svar.GetInt("iters",3));
-            de.SetMinPatchSD(svar.GetDouble("sd",1.));
-            de.SetDepthRange(minmax[0],minmax[1],50);
-            cv::Mat mask;
-            std::vector<cv::Mat>  grays;
-            std::vector<std::array<double,9> > Rs,Ks;
-            std::vector<GSLAM::Point3d>        ts;
-            cv::Mat curImage = addFrame(cur,de,grays,Rs,Ks,ts,mask);
-            for(auto n:neighbors){
-                auto ref=map->getFrame(n);
-                addFrame(ref,de,grays,Rs,Ks,ts,mask);
-            }
-
-            csfm::DepthmapEstimatorResult result;
-            std::string method=svar.GetString("method","sample");
-            {
-                GSLAM::ScopedTimer tm("computeDepth");
-                if(method=="sample")
-                    de.ComputePatchMatchSample(&result);
-                else if(method=="patch")
-                    de.ComputePatchMatch(&result);
-                else
-                    de.ComputeBruteForce(&result);
-            }
-            for(int j=0;j<result.depth.total();j++){
-                float& depth = result.depth.at<float>(j);
-                if(depth<minmax[0])depth=0;
-                if(depth>minmax[1])depth=0;
-                if(result.score.at<float>(j)<minScore) depth=0;
-            }
-            mDepthes[cur->id()] = depthframe(cur,result,curImage,neighbors);
-            vDepthes.push_back(std::pair<GSLAM::FrameID,depthframe>(cur->id(),depthframe(cur,result,curImage,neighbors)));
+            getImageInfo(cur);
             count++;
-            //            save depth file
-            //            cv::Mat depth=result.depth.clone();
-            //            int mapminmax[]={50,245};
-            //            for(int j=0;j<depth.total();j++){
-            //                if(depth.at<float>(j)<minmax[0])continue;
-            //                depth.at<float>(j) = mapminmax[0]+ (mapminmax[1]-mapminmax[0])*(depth.at<float>(j)-minmax[0])/(minmax[1]-minmax[0]);
-            //            }
-            //            cv::imwrite(svar.GetString("savepath","./")+"newdepth.jpg",depth);
-            std::cout<<"img"<<count<<"complete!"<<std::endl;
-            if(count == svar.GetInt("imgnum",1)){
+            if(count == imageNum){
                 break;
             }
         }
-        cleandepth();
+    }
+    void calculatAllDetph(){
+        getScaledImages();
+        for(std::map<GSLAM::FrameID,ImageScaled>::iterator iter = mScaledImages.begin();iter != mScaledImages.end();iter++){
+            thread t(&depthframes::calculatImageDepth,this,iter->second.fr->id());
+            t.detach();
+        }
+    }
+    static void calculatImageDepth(depthframes* t,FrameID id){
+        ImageScaled curImageScaled = t->mScaledImages[id];
+        auto minmax  = getMinMaxDepth(curImageScaled.fr,t->map);
+
+        csfm::DepthmapEstimator de;
+        de.SetPatchMatchIterations(svar.GetInt("iters",3));
+        de.SetMinPatchSD(svar.GetDouble("sd",1.));
+        de.SetDepthRange(minmax[0],minmax[1],50);
+        cv::Mat mask;
+        std::vector<std::array<double,9> > Rs;
+        std::vector<GSLAM::Point3d>        ts;
+        t->addFrame(curImageScaled,de,Rs,ts,mask);
+        for(auto n:curImageScaled.neighbors){
+            t->addFrame(t->mScaledImages[n],de,Rs,ts,mask);
+        }
+
+        csfm::DepthmapEstimatorResult result;
+        std::string method=svar.GetString("method","sample");
+        {
+            GSLAM::ScopedTimer tm("computeDepth");
+            if(method=="sample")
+                de.ComputePatchMatchSample(&result);
+            else if(method=="patch")
+                de.ComputePatchMatch(&result);
+            else
+                de.ComputeBruteForce(&result);
+        }
+        for(int j=0;j<result.depth.total();j++){
+            float& depth = result.depth.at<float>(j);
+            if(depth<minmax[0])depth=0;
+            if(depth>minmax[1])depth=0;
+            if(result.score.at<float>(j)<t->minScore) depth=0;
+        }
+        {
+            t->m.lock();
+            t->mDepthes[id] = depthframe(curImageScaled.fr,result,curImageScaled.image_scaled,curImageScaled.neighbors);
+            t->vDepthes.push_back(depthframe(curImageScaled.fr,result,curImageScaled.image_scaled,curImageScaled.neighbors));
+            t->m.unlock();
+        }
+        //            save depth file
+        //            cv::Mat depth=result.depth.clone();
+        //            int mapminmax[]={50,245};
+        //            for(int j=0;j<depth.total();j++){
+        //                if(depth.at<float>(j)<minmax[0])continue;
+        //                depth.at<float>(j) = mapminmax[0]+ (mapminmax[1]-mapminmax[0])*(depth.at<float>(j)-minmax[0])/(minmax[1]-minmax[0]);
+        //            }
+        //            cv::imwrite(svar.GetString("savepath","./")+"newdepth.jpg",depth);
     }
     void cleandepth(){
-        GSLAM::SE3 Tow=vDepthes[0].second.frame->getPose().inverse();
+        GSLAM::SE3 Tow=vDepthes[0].frame->getPose().inverse();
         for(int i=0;i<vDepthes.size();i++){
-            std::pair<GSLAM::FrameID,depthframe>& curDepth=vDepthes[i];
+            depthframe& curDepth=vDepthes[i];
             csfm::DepthmapCleaner cleaner;
-            GSLAM::SE3 Twf = curDepth.second.frame->getPose();
+            GSLAM::SE3 Twf = curDepth.frame->getPose();
             GSLAM::SE3 Tfo = (Tow*Twf).inverse();
             cv::Mat mask;
-            if(mask.empty()) mask=cv::Mat::ones(curDepth.second.image.rows,curDepth.second.image.cols,CV_8UC1);
+            if(mask.empty()) mask=cv::Mat::ones(curDepth.image.rows,curDepth.image.cols,CV_8UC1);
             std::array<double,9> R{1,0,0,0,1,0,0,0,1};
             Tfo.getRotation().getMatrix(R.data());
             GSLAM::Point3d t=Tfo.get_translation();
-            GSLAM::Camera cam = GSLAM::Camera(curDepth.second.frame->getCamera().estimatePinHoleCamera().getParameters());
+            GSLAM::Camera cam = GSLAM::Camera(curDepth.frame->getCamera().estimatePinHoleCamera().getParameters());
             cam.applyScale(scale);
             std::vector<double>  p=cam.getParameters();
             std::array<double,9> k={p[2], 0    , p[4],
                                     0   , p[3] , p[5],
                                     0   , 0    , 1};
-            cleaner.AddView(k.data(),R.data(),&t.x,(float*)curDepth.second.result.depth.data,curDepth.second.image.cols,curDepth.second.image.rows);
-            std::vector<GSLAM::FrameID> neighbers = curDepth.second.neighbors;
+            cleaner.AddView(k.data(),R.data(),&t.x,(float*)curDepth.result.depth.data,curDepth.image.cols,curDepth.image.rows);
+            std::vector<GSLAM::FrameID> neighbers = curDepth.neighbors;
             int neighberNum = 0;
             for(auto id:neighbers){
                 if(mDepthes.find(id)==mDepthes.end()){continue;}
@@ -337,34 +362,32 @@ public:
                 cleaner.AddView(k.data(),R.data(),&t.x,(float*)df.result.depth.data,df.image.cols,df.image.rows);
             }
             std::cout<<std::to_string(i)+"neighberNum: "<<neighberNum<<std::endl;
-            cleaner.Clean(curDepth.second.depth_in_ply);
-            cv::imwrite(std::to_string(i)+"ply.jpg",curDepth.second.depth_in_ply);
-            cv::imwrite(std::to_string(i)+"image.jpg",curDepth.second.result.depth);
+            cleaner.Clean(curDepth.depth_in_ply);
         }
     }
     void saveply(){
         PlyObject ply(plypath);
         int pointNum=0;
-        GSLAM::SE3 Tow=vDepthes[0].second.frame->getPose().inverse();
+        GSLAM::SE3 Tow=vDepthes[0].frame->getPose().inverse();
         for(int i=0;i<vDepthes.size();i++){
-            std::pair<GSLAM::FrameID,depthframe> curDepth=vDepthes[i];
+            depthframe curDepth=vDepthes[i];
             csfm::DepthmapPruner pruner;
-            GSLAM::SE3 Twf = curDepth.second.frame->getPose();
+            GSLAM::SE3 Twf = curDepth.frame->getPose();
             GSLAM::SE3 Tfo = (Tow*Twf).inverse();
             cv::Mat mask;
-            if(mask.empty()) mask=cv::Mat::ones(curDepth.second.image.rows,curDepth.second.image.cols,CV_8UC1);
+            if(mask.empty()) mask=cv::Mat::ones(curDepth.image.rows,curDepth.image.cols,CV_8UC1);
             std::array<double,9> R{1,0,0,0,1,0,0,0,1};
             Tfo.getRotation().getMatrix(R.data());
             GSLAM::Point3d t=Tfo.get_translation();
-            GSLAM::Camera cam = GSLAM::Camera(curDepth.second.frame->getCamera().estimatePinHoleCamera().getParameters());
+            GSLAM::Camera cam = GSLAM::Camera(curDepth.frame->getCamera().estimatePinHoleCamera().getParameters());
             cam.applyScale(scale);
             std::vector<double>  p=cam.getParameters();
             std::array<double,9> k={p[2], 0    , p[4],
                                     0   , p[3] , p[5],
                                     0   , 0    , 1};
-            pruner.AddView(k.data(),R.data(),&t.x,(float*)curDepth.second.depth_in_ply.data,(float*)curDepth.second.result.plane.data,
-                           curDepth.second.image.data,mask.data,curDepth.second.image.cols,curDepth.second.image.rows);
-            std::vector<GSLAM::FrameID> neighbers = curDepth.second.neighbors;
+            pruner.AddView(k.data(),R.data(),&t.x,(float*)curDepth.depth_in_ply.data,(float*)curDepth.result.plane.data,
+                           curDepth.image.data,mask.data,curDepth.image.cols,curDepth.image.rows);
+            std::vector<GSLAM::FrameID> neighbers = curDepth.neighbors;
             for(auto id:neighbers){
                 if(mDepthes.find(id)==mDepthes.end()){continue;}
                 depthframe df = mDepthes[id];
@@ -379,7 +402,6 @@ public:
                 std::array<double,9> k={p[2], 0    , p[4],
                                         0   , p[3] , p[5],
                                         0   , 0    , 1};
-
                 pruner.AddView(k.data(),R.data(),&t.x,(float*)df.depth_in_ply.data,(float*)df.result.plane.data,
                                df.image.data,mask.data,df.image.cols,df.image.rows);
             }
@@ -399,14 +421,16 @@ public:
 
 private:
     GSLAM::MapPtr map;
+    int imageNum;
     float minScore;
     float scale;
     std::string plypath;
     GSLAM::FrameArray allframes;
-    std::map<GSLAM::FrameID , cv::Mat> images;
     int depthMapNum;
+    GSLAM::Mutex m;
 
+    std::map<GSLAM::FrameID,ImageScaled> mScaledImages;
     std::map<GSLAM::FrameID,depthframe> mDepthes;
-    std::vector<std::pair<GSLAM::FrameID,depthframe> > vDepthes;
+    std::vector<depthframe> vDepthes;
     //    csfm::DepthmapEstimator de;
 };
