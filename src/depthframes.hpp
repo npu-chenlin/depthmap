@@ -157,7 +157,6 @@ std::vector<double> getMinMaxDepth(GSLAM::FramePtr fr,GSLAM::MapPtr map){
     fr->getObservations(observes);
     std::vector<double> minmax={10000000000,0.1};
     for(auto obs : observes){
-        GSLAM::ScopedTimer tm("computeMaxMindepth");
         GSLAM::PointPtr pt=map->getPoint(obs.first);
         double depth = (fr->getPose().inverse()*pt->getPose())[2];
         if(depth < minmax[0] && depth>0)minmax[0] = depth;
@@ -270,10 +269,13 @@ public:
     }
     void calculatAllDetph(){
         getScaledImages();
+        GSLAM::ThreadPool t(10);
+        std::vector<std::future<void>> rets;
         for(std::map<GSLAM::FrameID,ImageScaled>::iterator iter = mScaledImages.begin();iter != mScaledImages.end();iter++){
-            thread t(&depthframes::calculatImageDepth,this,iter->second.fr->id());
-            t.detach();
+            rets.push_back(t.Add(depthframes::calculatImageDepth,this,iter->second.fr->id()));
         }
+        for(auto& ret:rets) ret.wait();
+
     }
     static void calculatImageDepth(depthframes* t,FrameID id){
         ImageScaled curImageScaled = t->mScaledImages[id];
@@ -288,6 +290,7 @@ public:
         std::vector<GSLAM::Point3d>        ts;
         t->addFrame(curImageScaled,de,Rs,ts,mask);
         for(auto n:curImageScaled.neighbors){
+            if(t->mScaledImages.find(n) != t->mScaledImages.end())
             t->addFrame(t->mScaledImages[n],de,Rs,ts,mask);
         }
 
@@ -366,6 +369,7 @@ public:
         }
     }
     void saveply(){
+        cleandepth();
         PlyObject ply(plypath);
         int pointNum=0;
         GSLAM::SE3 Tow=vDepthes[0].frame->getPose().inverse();
