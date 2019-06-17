@@ -9,7 +9,7 @@ int main(int argc,char** argv)
                    svar.GetString("savepath",".")+"/result.ply");
     de.setMinScore(svar.GetDouble("score",0.1));
     de.setScale(svar.GetDouble("scale",0.1));
-    de.calculatAllDetph();
+    de.calculateAllDetph();
     de.saveply();
     return 0;
 }

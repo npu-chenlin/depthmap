@@ -17,21 +17,21 @@ struct PlyObject
     typedef pi::Point3ub Color3b;
     typedef pi::Point3d Point3d;
     typedef pi::Point3f Point3f;
-    
+
     std::string _file2save;
     std::vector<pi::Point3f>  vertices;
     std::vector<unsigned int> faces;
     std::vector<pi::Point3f>  normals;
     std::vector<pi::Point3ub> colors;
     std::vector<unsigned int> edges;
-    
+
     void addPoint(Point3d pt,Color3b color=Color3b(255,255,255),pi::Point3f normal=Point3f(0,0,1))
     {
         vertices.push_back(pt);
         colors.push_back(color);
         normals.push_back(normal);
     }
-    
+
     void addLine(Point3d first,Point3d second,Color3b color=Color3b(255,255,255),pi::Point3f normal=Point3f(0,0,1))
     {
         edges.push_back((uint32_t)vertices.size());
@@ -39,7 +39,7 @@ struct PlyObject
         addPoint(first,color,normal);
         addPoint(second,color,normal);
     }
-    
+
     bool save(std::string filename)
     {
         if(filename.substr(filename.find_last_of('.')+1)!="ply") return false;
@@ -49,10 +49,10 @@ struct PlyObject
             fprintf(stderr,"\nERROR: Could not open File %s for writing!",(filename).c_str());
             return false;
         }
-        
+
         uint32_t _verticesPerFace=3;
         bool binary=svar.GetInt("binary",0);
-        
+
         file << "ply";
         if(binary)file << "\nformat binary_little_endian 1.0";
         else file << "\nformat ascii 1.0";
@@ -72,13 +72,13 @@ struct PlyObject
         }
         file << "\nend_header";
         if(binary) file << "\n";
-        
+
         for(unsigned int i=0;i<vertices.size();i++){
             if(binary){
                 file.write((char*)(&(vertices[i])),sizeof(Vertex3f));
             }
             else file << "\n" << vertices[i].x << " " << vertices[i].y << " " << vertices[i].z;
-            
+
             if(normals.size())
             {
                 if(binary){
@@ -113,7 +113,7 @@ struct PlyObject
             }
             else file << "\n " << edges[i] << " " << edges[i+1];
         }
-        
+
         file.close();
         return true;
     }
@@ -123,7 +123,7 @@ std::vector<FrameID> getNeighbors(GSLAM::FramePtr fr,GSLAM::MapPtr map){
     std::map<GSLAM::PointID,size_t> observes;
     fr->getObservations(observes);
     std::map<GSLAM::FrameID,size_t> neighborsCount;
-    
+
     for(auto obs:observes){
         GSLAM::PointPtr pt=map->getPoint(obs.first);
         std::map<FrameID,size_t> ptObserves;
@@ -132,7 +132,7 @@ std::vector<FrameID> getNeighbors(GSLAM::FramePtr fr,GSLAM::MapPtr map){
             neighborsCount[ptObs.first]++;
         }
     }
-    
+
     std::vector<std::pair<size_t,GSLAM::FrameID>> sortedN;
     for(auto f:neighborsCount) sortedN.push_back(std::make_pair(f.second,f.first));
     std::sort(sortedN.begin(),sortedN.end());
@@ -260,6 +260,7 @@ public:
     void getScaledImages(){
         int count=0;
         for(GSLAM::FramePtr cur:allframes){
+            GSLAM::ScopedTimer tm("getScaledImage");
             getImageInfo(cur);
             count++;
             if(count == imageNum){
@@ -267,8 +268,9 @@ public:
             }
         }
     }
-    void calculatAllDetph(){
+    void calculateAllDetph(){
         getScaledImages();
+        GSLAM::ScopedTimer tm("calculateAllDepth");
         GSLAM::ThreadPool t(10);
         std::vector<std::future<void>> rets;
         for(std::map<GSLAM::FrameID,ImageScaled>::iterator iter = mScaledImages.begin();iter != mScaledImages.end();iter++){
@@ -297,7 +299,6 @@ public:
         csfm::DepthmapEstimatorResult result;
         std::string method=svar.GetString("method","sample");
         {
-            GSLAM::ScopedTimer tm("computeDepth");
             if(method=="sample")
                 de.ComputePatchMatchSample(&result);
             else if(method=="patch")

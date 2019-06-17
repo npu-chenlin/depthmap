@@ -233,7 +233,7 @@ public:
         RandomInitialization(result, true);
 
         for (int i = 0; i < patchmatch_iterations_; ++i) {
-            GSLAM::ScopedTimer tm("PatchMatchIter");
+//            GSLAM::ScopedTimer tm("PatchMatchIter");
             PatchMatchForwardPass(result, true);
             PatchMatchBackwardPass(result, true);
             std::cout<<i+1<<"/"<<patchmatch_iterations_<<std::endl;
@@ -243,7 +243,7 @@ public:
     }
 
     void AssignMatrices(DepthmapEstimatorResult *result) {
-        GSLAM::ScopedTimer tm("AssignMatrices");
+//        GSLAM::ScopedTimer tm("AssignMatrices");
         result->depth = cv::Mat(images_[0].rows, images_[0].cols, CV_32F, 0.0f);
         result->plane = cv::Mat(images_[0].rows, images_[0].cols, CV_32FC3, 0.0f);
         result->score = cv::Mat(images_[0].rows, images_[0].cols, CV_32F, 0.0f);
@@ -251,7 +251,7 @@ public:
     }
 
     void RandomInitialization(DepthmapEstimatorResult *result, bool sample) {
-        GSLAM::ScopedTimer tm("RandomInitialization");
+//        GSLAM::ScopedTimer tm("RandomInitialization");
         int hpz = (patch_size_ - 1) / 2;
         for (int i = hpz; i < result->depth.rows - hpz; ++i) {
             for (int j = hpz; j < result->depth.cols - hpz; ++j) {
@@ -273,7 +273,7 @@ public:
     }
 
     void ComputeIgnoreMask(DepthmapEstimatorResult *result) {
-        GSLAM::ScopedTimer tm("ComputeIgnoreMask");
+//        GSLAM::ScopedTimer tm("ComputeIgnoreMask");
         int hpz = (patch_size_ - 1) / 2;
         for (int i = hpz; i < result->depth.rows - hpz; ++i) {
             for (int j = hpz; j < result->depth.cols - hpz; ++j) {
